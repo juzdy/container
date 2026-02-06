@@ -164,7 +164,7 @@ class Container implements JuzdyContainerInterface
     public function has(string $id): bool
     {
         return 
-            $id === ContainerInterface::class 
+            is_a($id, ContainerInterface::class, true)
             || $this->hasShared($id)
             || $this->can($id)
         ;
@@ -176,18 +176,24 @@ class Container implements JuzdyContainerInterface
     public function can(string $id): bool
     {
         try {
-           
-            /**
-             * @todo More robust check for instantiability
-             */
-           
+
+            $context = $this->createContext($id);
+
+            $this->resolve($context);
+
+            $ref = $context->reflection();
+            if ($ref !== null && $ref->isInstantiable()) {
+                return true;
+            }
 
         } catch (Throwable) {
-            
+            // Ignore exceptions and return false
+            // Means the service cannot be resolved/created
         }
 
         return false;
     }
+
 
     /**
      * {@inheritDoc}
@@ -245,7 +251,7 @@ class Container implements JuzdyContainerInterface
     protected function fetch(string $id): mixed
     {
         $service = $this->getShared($id);
-        $context = new Context($id, $this);
+        $context = $this->createContext($id);
 
         $context
             ->id($id)
@@ -303,11 +309,11 @@ class Container implements JuzdyContainerInterface
      */
     protected function create(string $id): mixed
     {
-        $context = new Context($id, $this);
+        $context = $this->createContext($id);
 
         return $this
             ->resolve($context)
-            ->dependencies($context)
+            ->di($context, false)
             ->factory($context)
             ->aware($context)
             ->lifecycle($context)
@@ -360,14 +366,19 @@ class Container implements JuzdyContainerInterface
      * Resolve dependencies for the context.
      *
      * @param ContextInterface $context The context to resolve dependencies for
+     * @param bool $dry Whether to perform a dry run (only check if dependencies can be resolved)
      * 
      * @return static
      */
-    protected function dependencies(ContextInterface $context): static
+    protected function di(ContextInterface $context, bool $dry): static
     {
-        foreach ($context->dependencies() as $param) {
+        foreach ($context->params() as $param) {
             $dep = $this->getDiManager()
-                ->process($context->attribute(ContextInterface::ATTRIBUTE_CURRENT_PARAMETER, $param));
+                ->process(
+                    $context
+                        ->property(ContextInterface::PROPERTY_CURRENT_PARAMETER, $param)
+                        //->property(ContextInterface::PROPERTY_DRY_RUN, $dry)
+                );
 
             $context->depends($dep);
         }
@@ -521,24 +532,14 @@ class Container implements JuzdyContainerInterface
     }
 
     /**
-     * Format an error message with context information.
+     * Create a new context for the given service identifier.
      *
-     * @param string $message The error message
-     * @param ContextInterface $context The context of the error
+     * @param string $id The service identifier
      * 
-     * @return string The formatted error message
+     * @return ContextInterface The created context
      */
-    // protected function formatErrorMessage(string $message, ContextInterface $context): string
-    // {
-    //     $class = $context->reflection()->getName();
-    //     $params = [];
-    //     foreach ($context->injects() as $param) {
-    //         $ptype = $param->getType()?->__toString() ?? 'mixed';
-    //         $params[] = "{$ptype} \${$param->getName()}";
-    //     }
-    //     $paramList = implode(', ', $params);
-
-    //     return "Cannot resolve {$class}::__construct({$paramList}); Reason: " . $message. '; Stack: ' . implode(' -> ', $this->stack) . ' -> ' . $class;
-    // }
-
+    protected function createContext(string $id): ContextInterface
+    {
+        return new Context($id, $this);
+    }
 }

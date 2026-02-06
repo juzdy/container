@@ -19,7 +19,7 @@ class UseParameterAttribute extends AbstractDi
         /** @var ContextInterface $context */
         $context = $target;
         /** @var \ReflectionParameter $param */
-        $param = $context->attribute(ContextInterface::ATTRIBUTE_CURRENT_PARAMETER);
+        $param = $context->property(ContextInterface::PROPERTY_CURRENT_PARAMETER);
 
         $attributes = $param->getAttributes(Using::class);
 

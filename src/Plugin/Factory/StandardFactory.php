@@ -15,7 +15,9 @@ class StandardFactory implements PluginInterface
     public function __invoke(mixed $context, callable $next): mixed
     {
         try {
+            
             return new ($context->class())(...$context->depends());
+
         } catch (\Throwable $e) {
             throw new RuntimeException(
                 'Failed to instantiate service: ' . $context->class() . '. Reason: ' . $e->getMessage(),

@@ -4,11 +4,12 @@ namespace Juzdy\Container\Context;
 use Juzdy\Container\JuzdyContainerInterface;
 use ReflectionClass;
 use ReflectionMethod;
+use Traversable;
 
 interface ContextInterface
 {
 
-    const ATTRIBUTE_CURRENT_PARAMETER = 'current_parameter';
+    const PROPERTY_CURRENT_PARAMETER = 'current_parameter';
 
     /**
      * Get the container associated with the context
@@ -27,14 +28,14 @@ interface ContextInterface
     public function instance(mixed $instance = null): mixed;
 
     /**
-     * Set or get an attribute associated with the context
+     * Set or get a property associated with the context
      *
-     * @param string $name        The name of the attribute
-     * @param mixed|null $value   The value to set for the attribute (if null, the attribute is retrieved)
+     * @param string $name        The name of the property
+     * @param mixed|null $value   The value to set for the property (if null, the property is retrieved)
      *
-     * @return mixed              The value of the attribute (if getting) or the current instance (if setting)
+     * @return mixed              The value of the property (if getting) or the current instance (if setting)
      */
-    public function attribute(string $name, mixed $value = null): mixed;
+    public function property(string $name, mixed $value = null): mixed;
 
     /**
      * Set or get the identifier associated with the context
@@ -64,11 +65,20 @@ interface ContextInterface
     public function constructor(): ?ReflectionMethod;
 
     /**
+     * Get the list of parameters for the constructor
+     * 
+     * @return Traversable
+     */
+    public function params(): Traversable;
+
+    /**
      * Register dependencies for the context and return the list of all dependencies
      *
      * @param mixed ...$dependencies    Variadic list of dependencies to register
      * 
-     * @return array                    The list of all registered dependencies
+     * @return Traversable              The list of all dependencies
      */
     public function depends(...$dependencies): array;
+
+    
 }

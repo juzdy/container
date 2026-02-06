@@ -16,7 +16,7 @@ class TypeResolver implements PluginInterface
         /** @var ContextInterface $context */
         /** @var \ReflectionParameter $param */
         $context = $target;
-        $param = $context->attribute(ContextInterface::ATTRIBUTE_CURRENT_PARAMETER);
+        $param = $context->property(ContextInterface::PROPERTY_CURRENT_PARAMETER);
 
        $type = $param->getType();
 

@@ -32,7 +32,7 @@ class Context implements ContextInterface
     protected array $dependencies = [];
 
     /** @var array<string, mixed> */
-    protected array $attributes = [];
+    protected array $properties = [];
 
 
     /** 
@@ -59,6 +59,20 @@ class Context implements ContextInterface
     /**
      * {@inheritDoc}
      */
+    public function property(string $name, mixed $value = null): mixed
+    {
+        if ($value !== null) {
+            $this->properties[$name] = $value;
+
+            return $this;
+        }
+
+        return $this->properties[$name] ?? null;
+    }
+
+    /**
+     * {@inheritDoc}
+     */
     public function instance(mixed $instance = null): mixed
     {
         if ($instance !== null) {
@@ -68,20 +82,6 @@ class Context implements ContextInterface
         }
 
         return $this->instance;
-    }
-
-    /**
-     * {@inheritDoc}
-     */
-    public function attribute(string $name, mixed $value = null): mixed
-    {
-        if ($value !== null) {
-            $this->attributes[$name] = $value;
-
-            return $this;
-        }
-
-        return $this->attributes[$name] ?? null;
     }
 
     /**
@@ -134,7 +134,7 @@ class Context implements ContextInterface
     /**
      * {@inheritDoc}
      */
-    public function dependencies(): Traversable
+    public function params(): Traversable
     {
         if ($this->constructor() === null) {
             return [];
@@ -145,8 +145,6 @@ class Context implements ContextInterface
         }
     }
 
-    
-
     /**
      * {@inheritDoc}
      */
@@ -156,4 +154,5 @@ class Context implements ContextInterface
 
         return $this->dependencies;
     }
+
 }
