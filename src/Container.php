@@ -177,8 +177,7 @@ class Container implements JuzdyContainerInterface
     {
         try {
 
-            $context = $this->createContext($id);
-
+            $context = $this->context($id);
             $this->resolve($context);
 
             $ref = $context->reflection();
@@ -251,11 +250,9 @@ class Container implements JuzdyContainerInterface
     protected function fetch(string $id): mixed
     {
         $service = $this->getShared($id);
-        $context = $this->createContext($id);
+        $context = $this->context($id);
 
         $context
-            ->id($id)
-            ->class($service::class)
             ->instance($service);
         
         $this->getFetchManager()
@@ -309,7 +306,7 @@ class Container implements JuzdyContainerInterface
      */
     protected function create(string $id): mixed
     {
-        $context = $this->createContext($id);
+        $context = $this->context($id);
 
         return $this
             ->resolve($context)
@@ -538,7 +535,7 @@ class Container implements JuzdyContainerInterface
      * 
      * @return ContextInterface The created context
      */
-    protected function createContext(string $id): ContextInterface
+    protected function context(string $id, ): ContextInterface
     {
         return new Context($id, $this);
     }

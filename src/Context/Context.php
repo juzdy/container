@@ -106,6 +106,10 @@ class Context implements ContextInterface
             $this->className = $className;
         }
 
+        if ($this->instance() !== null && $this->className === null) {
+            $this->className = ($this->instance())::class;
+        }
+
         return $this->className;
     }
 
