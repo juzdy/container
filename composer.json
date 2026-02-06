@@ -16,7 +16,7 @@
     },
     "autoload": {
         "psr-4": {
-            "Juzdy\\Container": "src/"
+            "Juzdy\\Container\\": "src/"
         }
     },
     "autoload-dev": {
