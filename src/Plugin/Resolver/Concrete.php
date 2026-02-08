@@ -17,6 +17,7 @@ class Concrete implements PluginInterface
         /** @var ContextInterface $context */
         $context = $target;
         $class = $context->id();
+        
         if (class_exists($class)) {
             $context->class($class);
             return true;

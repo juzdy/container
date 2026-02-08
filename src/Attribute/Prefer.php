@@ -11,7 +11,7 @@ use Attribute;
  * @package Juzdy\Container\Attribute
  */
 #[Attribute(Attribute::TARGET_CLASS)]
-class Preference
+class Prefer
 {
     public function __construct(
         public readonly array $preferences = [],

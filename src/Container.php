@@ -20,6 +20,12 @@ use Juzdy\Container\Plugin\LifeCycle\Shared;
 use Juzdy\Container\Plugin\Resolver\Concrete;
 use Juzdy\Container\Plugin\Resolver\InterfaceConvention;
 use Juzdy\Container\Plugin\Resolver\WireResolver;
+use Juzdy\Plugin\Manager\AwareManagerInterface;
+use Juzdy\Plugin\Manager\DiManagerInterface;
+use Juzdy\Plugin\Manager\FactoryManagerInterface;
+use Juzdy\Plugin\Manager\FetchManagerInterface;
+use Juzdy\Plugin\Manager\LifeCycleManagerInterface;
+use Juzdy\Plugin\Manager\ResolveManagerInterface;
 use Throwable;
 
 /**
@@ -114,7 +120,7 @@ class Container implements JuzdyContainerInterface
 
         $this->getResolveManager(
             new Concrete(),
-            new WireResolver(),              
+            new WireResolver(),
             new InterfaceConvention(),
         );
 
@@ -177,7 +183,7 @@ class Container implements JuzdyContainerInterface
     {
         try {
 
-            $context = $this->context($id);
+            $context = $this->serviceContext($id);
             $this->resolve($context);
 
             $ref = $context->reflection();
@@ -250,7 +256,7 @@ class Container implements JuzdyContainerInterface
     protected function fetch(string $id): mixed
     {
         $service = $this->getShared($id);
-        $context = $this->context($id);
+        $context = $this->serviceContext($id);
 
         $context
             ->instance($service);
@@ -306,7 +312,7 @@ class Container implements JuzdyContainerInterface
      */
     protected function create(string $id): mixed
     {
-        $context = $this->context($id);
+        $context = $this->serviceContext($id);
 
         return $this
             ->resolve($context)
@@ -441,6 +447,7 @@ class Container implements JuzdyContainerInterface
     {
         if ($this->resolveManager === null) {
             $this->resolveManager = new PluginManager(...$plugins);
+            $this->share(ResolveManagerInterface::class, $this->resolveManager);
         }
 
         return $this->resolveManager;
@@ -457,6 +464,7 @@ class Container implements JuzdyContainerInterface
     {
         if ($this->diManager === null) {
             $this->diManager = new PluginManager(...$plugins);
+            $this->share(DiManagerInterface::class, $this->diManager);
         }
 
         return $this->diManager;
@@ -473,6 +481,7 @@ class Container implements JuzdyContainerInterface
     {
         if ($this->factoryManager === null) {
             $this->factoryManager = new PluginManager(...$plugins);
+            $this->share(FactoryManagerInterface::class, $this->factoryManager);
         }
 
         return $this->factoryManager;
@@ -489,6 +498,7 @@ class Container implements JuzdyContainerInterface
     {
         if ($this->awareManager === null) {
             $this->awareManager = new PluginManager(...$plugins);
+            $this->share(AwareManagerInterface::class, $this->awareManager);
         }
 
         return $this->awareManager;
@@ -506,6 +516,7 @@ class Container implements JuzdyContainerInterface
     {
         if ($this->lifecycleManager === null) {
             $this->lifecycleManager = new PluginManager(...$plugins);
+            $this->share(LifeCycleManagerInterface::class, $this->lifecycleManager);
         }
 
         return $this->lifecycleManager;
@@ -523,6 +534,7 @@ class Container implements JuzdyContainerInterface
         
         if ($this->fetchManager === null) {
             $this->fetchManager = new PluginManager(...$plugins);
+            $this->share(FetchManagerInterface::class, $this->fetchManager);
         }
 
         return $this->fetchManager;
@@ -535,7 +547,7 @@ class Container implements JuzdyContainerInterface
      * 
      * @return ContextInterface The created context
      */
-    protected function context(string $id, ): ContextInterface
+    protected function serviceContext(string $id, ): ContextInterface
     {
         return new Context($id, $this);
     }
