@@ -20,12 +20,8 @@ use Juzdy\Container\Plugin\LifeCycle\Shared;
 use Juzdy\Container\Plugin\Resolver\Concrete;
 use Juzdy\Container\Plugin\Resolver\InterfaceConvention;
 use Juzdy\Container\Plugin\Resolver\WireResolver;
-use Juzdy\Plugin\Manager\AwareManagerInterface;
-use Juzdy\Plugin\Manager\DiManagerInterface;
-use Juzdy\Plugin\Manager\FactoryManagerInterface;
-use Juzdy\Plugin\Manager\FetchManagerInterface;
-use Juzdy\Plugin\Manager\LifeCycleManagerInterface;
-use Juzdy\Plugin\Manager\ResolveManagerInterface;
+use Juzdy\Container\Repository\RepositoryInterface;
+use Juzdy\Container\Repository\SharedRepository;
 use Throwable;
 
 /**
@@ -35,11 +31,10 @@ use Throwable;
  */
 class Container implements JuzdyContainerInterface
 {
-    
     /**
-     * @var array<string, mixed> Registered shared services
+     * @var RepositoryInterface|null The shared repository instance.
      */
-    protected array $shared = [];
+    protected ?RepositoryInterface $sharedRepository = null;
 
     /**
      * @var array<int, string> Stack of currently resolving services
@@ -205,29 +200,62 @@ class Container implements JuzdyContainerInterface
      */
     public function get(string $id): mixed
     {
-        if (isset($this->resolving[$id])) {
+        if ($this->isResolving($id)) {
             throw new CircularDependencyException('Circular dependency detected while resolving service ' . $id . '. Stack: ' . implode(' -> ', $this->stack) . ' -> ' . $id);
         }
 
-        array_push($this->stack, $id);
-        $this->resolving[$id] = true;
+        $this->pushStack($id)
+            ->startResolving($id);
 
         try {
             $service = match (true) {
                 $id === ContainerInterface::class => $this,
-                $this->hasShared($id) => $this->fetch($id),
+                $this->hasShared($id) => $this->fetchShared($id),
                 default => $this->create($id),
             };
-        } 
-        catch (Throwable $ex) {
-            throw $ex;
         }
         finally {
-            array_pop($this->stack);
-            unset($this->resolving[$id]);
+            $this->popStack()
+                ->stopResolving($id);
         }
 
         return $service;
+    }
+
+    private function isResolving(string $id): bool
+    {
+        return isset($this->resolving[$id]);
+    }
+
+    private function startResolving(string $id): static
+    {
+        $this->resolving[$id] = true;
+
+        return $this;
+    }
+
+    private function stopResolving(string $id): static
+    {
+        unset($this->resolving[$id]);
+
+        return $this;
+    }
+
+    private function pushStack(string $id): static
+    {
+        if (count($this->stack) > 100) {
+            //todo    
+        }
+
+        return $this;
+    }
+
+    private function popStack(): static
+    {
+        array_pop($this->stack);
+
+
+        return $this;
     }
 
     /**
@@ -235,9 +263,19 @@ class Container implements JuzdyContainerInterface
      */
     public function share(string $id, mixed $instance): static
     {
-        $this->shared[$id] = $instance;
+        $this->getSharedRepository()->set($id, $instance);
 
         return $this;
+    }
+
+    /**
+     * Get the shared repository.
+     *
+     * @return RepositoryInterface The shared repository instance
+     */
+    protected function getSharedRepository(): RepositoryInterface
+    {
+        return $this->sharedRepository ??= $this->get(SharedRepository::class);
     }
 
     public function stack(): array
@@ -246,14 +284,13 @@ class Container implements JuzdyContainerInterface
     }
     
     /**
-     * Require the service with the given identifier.
-     * Pipelines through require plugins.
+     * Fetch a shared service.
      *
      * @param string $id The service identifier
      * 
-     * @return mixed The required service instance
+     * @return mixed The shared service instance
      */
-    protected function fetch(string $id): mixed
+    protected function fetchShared(string $id): mixed
     {
         $service = $this->getShared($id);
         $context = $this->serviceContext($id);
@@ -262,7 +299,9 @@ class Container implements JuzdyContainerInterface
             ->instance($service);
         
         $this->getFetchManager()
-                ->process($context);
+                ->process(
+                    $this->serviceContext($id)->instance($service)
+                );
 
         return $context->instance();
     }
@@ -276,7 +315,7 @@ class Container implements JuzdyContainerInterface
      */
     protected function hasShared(string $id): bool
     {
-        return array_key_exists($id, $this->shared);
+        return $this->sharedRepository ? $this->getSharedRepository()->has($id) : false;
     }
 
     
@@ -289,7 +328,7 @@ class Container implements JuzdyContainerInterface
      */
     protected function getShared(string $id): mixed
     {
-        return $this->shared[$id];
+        return $this->sharedRepository ? $this->getSharedRepository()->get($id) : null;
     }
 
     /**
@@ -297,7 +336,9 @@ class Container implements JuzdyContainerInterface
      */
     protected function forgetShared(string $id): static
     {
-        unset($this->shared[$id]);
+        if ($this->sharedRepository) {
+            $this->getSharedRepository()->remove($id);
+        }
 
         return $this;
     }
@@ -447,7 +488,7 @@ class Container implements JuzdyContainerInterface
     {
         if ($this->resolveManager === null) {
             $this->resolveManager = new PluginManager(...$plugins);
-            $this->share(ResolveManagerInterface::class, $this->resolveManager);
+            //$this->share(ResolveManagerInterface::class, $this->resolveManager);
         }
 
         return $this->resolveManager;
@@ -464,7 +505,7 @@ class Container implements JuzdyContainerInterface
     {
         if ($this->diManager === null) {
             $this->diManager = new PluginManager(...$plugins);
-            $this->share(DiManagerInterface::class, $this->diManager);
+            //$this->share(DiManagerInterface::class, $this->diManager);
         }
 
         return $this->diManager;
@@ -481,7 +522,7 @@ class Container implements JuzdyContainerInterface
     {
         if ($this->factoryManager === null) {
             $this->factoryManager = new PluginManager(...$plugins);
-            $this->share(FactoryManagerInterface::class, $this->factoryManager);
+            //$this->share(FactoryManagerInterface::class, $this->factoryManager);
         }
 
         return $this->factoryManager;
@@ -498,7 +539,7 @@ class Container implements JuzdyContainerInterface
     {
         if ($this->awareManager === null) {
             $this->awareManager = new PluginManager(...$plugins);
-            $this->share(AwareManagerInterface::class, $this->awareManager);
+            //$this->share(AwareManagerInterface::class, $this->awareManager);
         }
 
         return $this->awareManager;
@@ -516,7 +557,7 @@ class Container implements JuzdyContainerInterface
     {
         if ($this->lifecycleManager === null) {
             $this->lifecycleManager = new PluginManager(...$plugins);
-            $this->share(LifeCycleManagerInterface::class, $this->lifecycleManager);
+            //$this->share(LifeCycleManagerInterface::class, $this->lifecycleManager);
         }
 
         return $this->lifecycleManager;
@@ -534,7 +575,7 @@ class Container implements JuzdyContainerInterface
         
         if ($this->fetchManager === null) {
             $this->fetchManager = new PluginManager(...$plugins);
-            $this->share(FetchManagerInterface::class, $this->fetchManager);
+            //$this->share(FetchManagerInterface::class, $this->fetchManager);
         }
 
         return $this->fetchManager;
@@ -551,4 +592,5 @@ class Container implements JuzdyContainerInterface
     {
         return new Context($id, $this);
     }
+
 }
