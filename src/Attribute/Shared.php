@@ -14,7 +14,7 @@ use Attribute;
 class Shared
 {
     public function __construct(
-        public readonly bool $isShared = true
+        public readonly bool $canShare = true
     ) {
     }
 
@@ -23,8 +23,8 @@ class Shared
      *
      * @return bool True if the service is shared, false otherwise
      */
-    public function isShared(): bool
+    public function canShare(): bool
     {
-        return $this->isShared;
+        return $this->canShare;
     }
 }

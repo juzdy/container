@@ -1,27 +1,25 @@
 <?php
-
+/**
+ ▄▄▄
+  █ J █ u z d y
+   ▀▀▀
+ */
 namespace Juzdy\Container;
 
 use Psr\Container\ContainerInterface;
-use Juzdy\Container\Exception\NotFoundException;
 use Juzdy\Container\Context\Context;
 use Juzdy\Container\Context\ContextInterface;
 use Juzdy\Container\Exception\CircularDependencyException;
-use Juzdy\Container\Plugin\Di\DiNotFound;
-use Juzdy\Container\Plugin\Di\UseClassAttribute;
-use Juzdy\Container\Plugin\Di\UseParameterAttribute;
-use Juzdy\Container\Plugin\Di\UseType;
-use Juzdy\Container\Plugin\PluginInterface;
-use Juzdy\Container\Plugin\Factory\FallbackFactory;
-use Juzdy\Container\Plugin\Factory\LazyGhostFactory;
-use Juzdy\Container\Plugin\Factory\StandardFactory;
-use Juzdy\Container\Plugin\LifeCycle\Prototype;
-use Juzdy\Container\Plugin\LifeCycle\Shared;
-use Juzdy\Container\Plugin\Resolver\Concrete;
-use Juzdy\Container\Plugin\Resolver\InterfaceConvention;
-use Juzdy\Container\Plugin\Resolver\WireResolver;
-use Juzdy\Container\Repository\RepositoryInterface;
-use Juzdy\Container\Repository\SharedRepository;
+use Juzdy\Container\Exception\NotFoundException;
+use Juzdy\Container\Pipeline\ContextPipeline;
+use Juzdy\Container\Pipeline\Pipe\Configurator;
+use Juzdy\Container\Pipeline\Pipe\DependencyCollector;
+use Juzdy\Container\Pipeline\Pipe\ImplementationResolver;
+use Juzdy\Container\Pipeline\Pipe\InstanceFetcher;
+use Juzdy\Container\Pipeline\Pipe\Instantiator;
+use Juzdy\Container\Pipeline\Pipe\LifeCycler;
+use Juzdy\Container\Repository\BindingManager;
+use Juzdy\Container\Repository\ShareManager;
 use Throwable;
 
 /**
@@ -31,11 +29,6 @@ use Throwable;
  */
 class Container implements JuzdyContainerInterface
 {
-    /**
-     * @var RepositoryInterface|null The shared repository instance.
-     */
-    protected ?RepositoryInterface $sharedRepository = null;
-
     /**
      * @var array<int, string> Stack of currently resolving services
      */
@@ -47,51 +40,14 @@ class Container implements JuzdyContainerInterface
     protected array $resolving = [];
 
     /**
+     * @var array<string, string> System-wide shared services.
+     */
+    protected array $systemShares = [];
+
+    /**
      * @var array<int, array<string, string>> Runtime preferences for interfaces
      */
-    protected array $propagatedPreferences = [];
-
-    /**
-     * @var PluginManagerInterface|null The resolve plugin manager.
-     * 
-     * Resolves id to service concrete class.
-     */
-    protected ?PluginManagerInterface $resolveManager = null;
-    
-    /**
-     * @var PluginManagerInterface|null The resolve plugin manager.
-     * 
-     * Resolves dependencies.
-     */
-    protected ?PluginManagerInterface $diManager = null;
-
-    /**
-     * @var PluginManagerInterface|null The factory plugin manager
-     * 
-     * Processes service creation.
-     */
-    protected ?PluginManagerInterface $factoryManager = null;
-
-    /**
-     * @var PluginManagerInterface|null The aware plugin manager.
-     * 
-     * Processes awares. e.g., dependency injection by setter methods.
-     */
-    protected ?PluginManagerInterface $awareManager = null;
-
-    /**
-     * @var PluginManagerInterface|null The lifecycle plugin manager.
-     * 
-     * Processes lifecycle management of services.
-     */
-    protected ?PluginManagerInterface $lifecycleManager = null;
-
-    /**
-     * @var PluginManagerInterface|null The fetch plugin manager.
-     * 
-     * Processes shared services on fetch.
-     */
-    protected ?PluginManagerInterface $fetchManager = null;
+    //protected array $propagatedPreferences = [];
 
     /**
      * Container constructor.
@@ -99,64 +55,8 @@ class Container implements JuzdyContainerInterface
      */
     public function __construct()
     {
-        $this->initPlugins();
-    }
-
-    /**
-     * Initialize and register default plugins
-     *
-     * @return static
-     */
-    protected function initPlugins(): static
-    {
-        $this->getFetchManager(
-            new Prototype(),          //First registered, last executed
-        );
-
-        $this->getResolveManager(
-            new Concrete(),
-            new WireResolver(),
-            new InterfaceConvention(),
-        );
-
-        $this->getDiManager(
-            new DiNotFound(),
-            new UseType(),
-            //new AttributeClassPropagated(),
-            new UseClassAttribute(),
-            new UseParameterAttribute(),
-        );
-
-        $this->getFactoryManager(
-            new FallbackFactory(),
-            new StandardFactory(),
-            new LazyGhostFactory(),
-            //new CustomFactory()
-        );
-
-        $this->getAwareManager(
-            new Plugin\Aware\Injector()
-        );
-
-        $this->getLifecycleManager(
-            new Shared()
-        );        
-        return $this;
-    }
-
-    public function propagatePreference(string $id, string $preference): static
-    {
-        array_unshift(
-            $this->propagatedPreferences[$id] ??= [],
-            $preference
-        );
-
-        return $this;
-    }
-
-    public function getPropagatedPreferences(): array
-    {
-        return $this->propagatedPreferences;
+        $this->setSystemShare(ShareManager::class, new ShareManager());
+        $this->setSystemShare(BindingManager::class, new BindingManager());
     }
 
     /**
@@ -164,34 +64,26 @@ class Container implements JuzdyContainerInterface
      */
     public function has(string $id): bool
     {
-        return 
-            is_a($id, ContainerInterface::class, true)
-            || $this->hasShared($id)
-            || $this->can($id)
-        ;
-    }
-
-    /**
-     * {@inheritDoc}
-     */
-    public function can(string $id): bool
-    {
         try {
+            $this->assertNotResolving($id)
+                ->startResolving($id);
 
-            $context = $this->serviceContext($id);
-            $this->resolve($context);
-
-            $ref = $context->reflection();
-            if ($ref !== null && $ref->isInstantiable()) {
-                return true;
-            }
+            return match (true) {
+                $id === ContainerInterface::class => true,
+                $id === static::class => true,
+                $this->hasSystemShare($id) => true,
+                $this->existing($id) !== null => true,
+                default => false,
+            };
 
         } catch (Throwable) {
-            // Ignore exceptions and return false
-            // Means the service cannot be resolved/created
-        }
+            return false;
 
-        return false;
+        } finally {
+
+            $this->stopResolving($id);
+            
+        }
     }
 
 
@@ -200,148 +92,79 @@ class Container implements JuzdyContainerInterface
      */
     public function get(string $id): mixed
     {
-        if ($this->isResolving($id)) {
-            throw new CircularDependencyException('Circular dependency detected while resolving service ' . $id . '. Stack: ' . implode(' -> ', $this->stack) . ' -> ' . $id);
-        }
-
-        $this->pushStack($id)
-            ->startResolving($id);
-
         try {
-            $service = match (true) {
+            $this->assertNotResolving($id)
+                ->startResolving($id);
+
+            return $service = match (true) {
                 $id === ContainerInterface::class => $this,
-                $this->hasShared($id) => $this->fetchShared($id),
+                $id === static::class => $this,
+                $this->hasSystemShare($id) => $this->getSystemShare($id),
+                ($instance = $this->existing($id)) !== null => $instance,
                 default => $this->create($id),
             };
+
+        //} catch (Throwable $exception) {
+        } catch (NotFoundException $exception) {
+            throw new NotFoundException(
+                "Service '$id' not found.",
+                [
+                    'service' => $id,
+                    'stack' => array_values($this->stack),
+                ],
+                0,
+                $exception
+            );
+
+        } finally {
+
+            $this->stopResolving($id);
+            
         }
-        finally {
-            $this->popStack()
-                ->stopResolving($id);
-        }
-
-        return $service;
-    }
-
-    private function isResolving(string $id): bool
-    {
-        return isset($this->resolving[$id]);
-    }
-
-    private function startResolving(string $id): static
-    {
-        $this->resolving[$id] = true;
-
-        return $this;
-    }
-
-    private function stopResolving(string $id): static
-    {
-        unset($this->resolving[$id]);
-
-        return $this;
-    }
-
-    private function pushStack(string $id): static
-    {
-        if (count($this->stack) > 100) {
-            //todo    
-        }
-
-        return $this;
-    }
-
-    private function popStack(): static
-    {
-        array_pop($this->stack);
-
-
-        return $this;
-    }
-
-    /**
-     * {@inheritDoc}
-     */
-    public function share(string $id, mixed $instance): static
-    {
-        $this->getSharedRepository()->set($id, $instance);
-
-        return $this;
-    }
-
-    /**
-     * Get the shared repository.
-     *
-     * @return RepositoryInterface The shared repository instance
-     */
-    protected function getSharedRepository(): RepositoryInterface
-    {
-        return $this->sharedRepository ??= $this->get(SharedRepository::class);
-    }
-
-    public function stack(): array
-    {
-        return $this->stack;
-    }
-    
-    /**
-     * Fetch a shared service.
-     *
-     * @param string $id The service identifier
-     * 
-     * @return mixed The shared service instance
-     */
-    protected function fetchShared(string $id): mixed
-    {
-        $service = $this->getShared($id);
-        $context = $this->serviceContext($id);
-
-        $context
-            ->instance($service);
         
-        $this->getFetchManager()
-                ->process(
-                    $this->serviceContext($id)->instance($service)
-                );
+    }
 
+    /**
+     * Resolve a service by its identifier.
+     * Checks for existing shared or bound instances.
+     * Pipelines through resolvers and fetchers to find existing instances.
+     * Returns the existing instance if found, or null if not found.
+     * 
+     * 
+     */
+    protected function existing(string $id): mixed
+    {
+        $pipeline = new ContextPipeline(
+            new ImplementationResolver(
+                \Juzdy\Container\Pipeline\Pipe\Resolver\Concrete::class,
+                \Juzdy\Container\Pipeline\Pipe\Resolver\BindingResolver::class,
+                \Juzdy\Container\Pipeline\Pipe\Resolver\InterfaceConvention::class
+            ),
+            new InstanceFetcher(
+                \Juzdy\Container\Pipeline\Pipe\Fetcher\SharedInstance::class,
+                \Juzdy\Container\Pipeline\Pipe\Fetcher\Prototype::class
+            ),
+        );
+
+        $context = $pipeline($this->serviceContext($id));
+
+        
         return $context->instance();
     }
 
-    /**
-     * Check if the local service is registered.
-     * 
-     * @param string $id The service identifier
-     * 
-     * @return bool True if the local service is registered, false otherwise
-     */
-    protected function hasShared(string $id): bool
-    {
-        return $this->sharedRepository ? $this->getSharedRepository()->has($id) : false;
-    }
+    // protected function _existing(string $id): mixed
+    // {
+    //     if ($id == ConfigInterface::class) {
+    //         return $this->_existing($id);
+    //     }
+    //     $sharedRepo = $this->getShareManager();
 
-    
-    /**
-     * Get the local shared service.
-     * 
-     * @param string $id The service identifier
-     * 
-     * @return mixed The local shared service instance
-     */
-    protected function getShared(string $id): mixed
-    {
-        return $this->sharedRepository ? $this->getSharedRepository()->get($id) : null;
-    }
+    //     if ($sharedRepo->has($id)) {
+    //         return $sharedRepo->get($id);
+    //     }
 
-    /**
-     * Forget a shared service.
-     */
-    protected function forgetShared(string $id): static
-    {
-        if ($this->sharedRepository) {
-            $this->getSharedRepository()->remove($id);
-        }
-
-        return $this;
-    }
+    //     return null;
+    // }
 
     /**
      * Create the service instance for the given identifier.
@@ -353,232 +176,144 @@ class Container implements JuzdyContainerInterface
      */
     protected function create(string $id): mixed
     {
-        $context = $this->serviceContext($id);
+        $pipeline = (new ContextPipeline(
+            new ImplementationResolver(
+                \Juzdy\Container\Pipeline\Pipe\Resolver\Concrete::class,
+                \Juzdy\Container\Pipeline\Pipe\Resolver\BindingResolver::class,
+                \Juzdy\Container\Pipeline\Pipe\Resolver\InterfaceConvention::class
+            ),
+            new DependencyCollector(
+                \Juzdy\Container\Pipeline\Pipe\DependencyCollector\UseParameterAttributePreference::class,
+                \Juzdy\Container\Pipeline\Pipe\DependencyCollector\UseClassAttributePreference::class,
+                \Juzdy\Container\Pipeline\Pipe\DependencyCollector\UseTypeHint::class,
+                \Juzdy\Container\Pipeline\Pipe\DependencyCollector\DependencyNotFound::class
+            ),
+            new Instantiator(
+                \Juzdy\Container\Pipeline\Pipe\Instantiator\LazyGhostInstance::class,
+                \Juzdy\Container\Pipeline\Pipe\Instantiator\StandardInstance::class,
+                \Juzdy\Container\Pipeline\Pipe\Instantiator\ReflectionInstance::class,
+                \Juzdy\Container\Pipeline\Pipe\Instantiator\InstantiatorNotFound::class,
+            ),
+            new Configurator(
+                \Juzdy\Container\Pipeline\Pipe\Configurator\Injector::class
+            ),
+            new LifeCycler(
+                \Juzdy\Container\Pipeline\Pipe\LifeCycler\ShareIfApplicable::class
+            )
+        ));
 
-        return $this
-            ->resolve($context)
-            ->di($context, false)
-            ->factory($context)
-            ->aware($context)
-            ->lifecycle($context)
-            ->instance($context);
-    }
+        $context = $pipeline($this->serviceContext($id));
 
-    /**
-     * Get the instance from the context.
-     *
-     * @param ContextInterface $context The context to get the instance from
-     * 
-     * @return mixed The instance from the context
-     */
-    protected function instance(ContextInterface $context): mixed
-    {
         return $context->instance();
+
+    }
+
+    
+
+    /**
+     * Check if a service is currently being resolved.
+     *
+     * @param string $id The service identifier to check
+     * 
+     * @return bool True if the service is currently being resolved, false otherwise
+     */
+    private function isResolving(string $id): bool
+    {
+        return isset($this->resolving[$id]);
     }
 
     /**
-     * Resolve the service for the context.
+     * Start resolving a service.
      *
-     * @param ContextInterface $context The context to resolve
+     * @param string $id The service identifier to start resolving
      * 
      * @return static
      */
-    protected function resolve(ContextInterface $context): static
+    private function startResolving(string $id): static
     {
-        /**
-         * Resolve the service class for the context using resolver plugins.
-         */
-        $this->getResolveManager()
-            ->process($context);
-
-        if (!$context->class()) {
-            throw new NotFoundException("Cannot resolve service '{$context->id()}'.");
+        if (count($this->stack) > 100) {
+            //todo    
         }
 
-        if (!class_exists($context->class())) {
-            throw new NotFoundException("Resolved class '{$context->class()}' for service '{$context->id()}' does not exist.");
-        }
-
-        if (!$context->reflection()?->isInstantiable()) {
-            throw new NotFoundException("Resolved class '{$context->class()}' for service '{$context->id()}' is not instantiable.");
-        }
+        $this->resolving[$id] = true;
+        array_push($this->stack, $id);
 
         return $this;
     }
 
     /**
-     * Resolve dependencies for the context.
+     * Stop resolving a service.
      *
-     * @param ContextInterface $context The context to resolve dependencies for
-     * @param bool $dry Whether to perform a dry run (only check if dependencies can be resolved)
+     * @param string $id The service identifier to stop resolving
      * 
      * @return static
      */
-    protected function di(ContextInterface $context, bool $dry): static
+    private function stopResolving(string $id): static
     {
-        foreach ($context->params() as $param) {
-            $dep = $this->getDiManager()
-                ->process(
-                    $context
-                        ->property(ContextInterface::PROPERTY_CURRENT_PARAMETER, $param)
-                        //->property(ContextInterface::PROPERTY_DRY_RUN, $dry)
-                );
-
-            $context->depends($dep);
-        }
+        array_pop($this->stack);
+        unset($this->resolving[$id]);
 
         return $this;
     }
 
     /**
-     * Process factory plugins for the context.
+     * Get the current resolution stack.
      *
-     * @param ContextInterface $context The context to process factory plugins for
-     * 
-     * @return static
+     * @return array<int, string> The current stack of resolving services
      */
-    protected function factory(ContextInterface $context): static
+    public function stack(): array
     {
-        $instance = $this->getFactoryManager()
-                ->process($context);
+        return $this->stack;
+    }
 
-        $context->instance($instance);
+    /**
+     * Get the ShareManager instance from the container.
+     *
+     * @return ShareManager The ShareManager instance
+     */
+    protected function hasSystemShare(string $id): bool
+    {
+        return isset($this->systemShares[$id]);
+    }
+
+    /**
+     * Get the ShareManager instance from the container.
+     *
+     * @return ShareManager The ShareManager instance
+     */
+    protected function getSystemShare(string $id): mixed
+    {
+        return $this->systemShares[$id] ?? null;
+    }
+
+    /**
+     * Set a system-wide shared service instance.
+     *
+     * @param string $id The identifier of the service to share
+     * @param mixed $instance The instance of the service to share
+     * 
+     * @return static Returns the Container instance for method chaining
+     */
+    protected function setSystemShare(string $id, mixed $instance): static
+    {
+        $this->systemShares[$id] = $instance;
 
         return $this;
     }
 
     /**
-     * Process aware plugins for the context.
-     *
-     * @param ContextInterface $context The context to process aware plugins for
-     * 
-     * @return static
+     * @param ContextInterface $context
+     * @param string $stage
+     * @return array<string, mixed>
      */
-    protected function aware(ContextInterface $context): static
+    protected function exceptionContext(ContextInterface $context, string $stage): array
     {
-        $this->getAwareManager()
-                ->process($context);
-
-        return $this;
-    }
-
-    /**
-     * Process lifecycle plugins for the context.
-     *
-     * @param ContextInterface $context The context to process lifecycle plugins for
-     * 
-     * @return static
-     */
-    protected function lifecycle(ContextInterface $context): static
-    {
-        $this->getLifecycleManager()
-                ->process($context);
-
-        return $this;
-    }
-
-    /**
-     * Get or create the resolve plugin manager.
-     * 
-     * @param PluginInterface ...$plugins Plugins to register
-     *
-     * @return PluginManagerInterface The resolve plugin manager
-     */
-    protected function getResolveManager(PluginInterface ...$plugins): PluginManagerInterface
-    {
-        if ($this->resolveManager === null) {
-            $this->resolveManager = new PluginManager(...$plugins);
-            //$this->share(ResolveManagerInterface::class, $this->resolveManager);
-        }
-
-        return $this->resolveManager;
-    }
-
-    /**
-     * Get or create the resolve plugin manager.
-     * 
-     * @param PluginInterface ...$plugins Plugins to register
-     *
-     * @return PluginManagerInterface The resolve plugin manager
-     */
-    protected function getDiManager(PluginInterface ...$plugins): PluginManagerInterface
-    {
-        if ($this->diManager === null) {
-            $this->diManager = new PluginManager(...$plugins);
-            //$this->share(DiManagerInterface::class, $this->diManager);
-        }
-
-        return $this->diManager;
-    }
-
-    /**
-     * Get or create the factory plugin manager.
-     * 
-     * @param PluginInterface ...$plugins Plugins to register
-     *
-     * @return PluginManagerInterface The factory plugin manager
-     */
-    protected function getFactoryManager(PluginInterface ...$plugins): PluginManagerInterface
-    {
-        if ($this->factoryManager === null) {
-            $this->factoryManager = new PluginManager(...$plugins);
-            //$this->share(FactoryManagerInterface::class, $this->factoryManager);
-        }
-
-        return $this->factoryManager;
-    }
-
-    /**
-     * Get or create the aware plugin manager.
-     * 
-     * @param PluginInterface ...$plugins Plugins to register
-     *
-     * @return PluginManagerInterface The aware plugin manager
-     */
-    protected function getAwareManager(PluginInterface ...$plugins): PluginManagerInterface
-    {
-        if ($this->awareManager === null) {
-            $this->awareManager = new PluginManager(...$plugins);
-            //$this->share(AwareManagerInterface::class, $this->awareManager);
-        }
-
-        return $this->awareManager;
-    }
-
-
-    /**
-     * Get or create the lifecycle plugin manager.
-     * 
-     * @param PluginInterface ...$plugins Plugins to register
-     *
-     * @return PluginManagerInterface The lifecycle plugin manager
-     */
-    protected function getLifecycleManager(PluginInterface ...$plugins): PluginManagerInterface
-    {
-        if ($this->lifecycleManager === null) {
-            $this->lifecycleManager = new PluginManager(...$plugins);
-            //$this->share(LifeCycleManagerInterface::class, $this->lifecycleManager);
-        }
-
-        return $this->lifecycleManager;
-    }
-
-    /**
-     * Get or create the require plugin manager.
-     * 
-     * @param PluginInterface ...$plugins Plugins to register
-     *
-     * @return PluginManagerInterface The require plugin manager
-     */
-    protected function getFetchManager(PluginInterface ...$plugins): PluginManagerInterface
-    {
-        
-        if ($this->fetchManager === null) {
-            $this->fetchManager = new PluginManager(...$plugins);
-            //$this->share(FetchManagerInterface::class, $this->fetchManager);
-        }
-
-        return $this->fetchManager;
+        return [
+            'stage' => $stage,
+            'service' => $context->id(),
+            'class' => $context->class(),
+            'stack' => array_values($this->stack),
+        ];
     }
 
     /**
@@ -590,7 +325,32 @@ class Container implements JuzdyContainerInterface
      */
     protected function serviceContext(string $id, ): ContextInterface
     {
-        return new Context($id, $this);
+        return 
+            (new Context($id, $this))
+        //        ->stack($this->stack)
+        ;
+    }
+
+    /**
+     * Assert that the service is not currently being resolved to prevent circular dependencies.
+     *
+     * @param string $id The service identifier to check
+     * 
+     * @throws CircularDependencyException If the service is currently being resolved
+     */
+    protected function assertNotResolving(string $id): static
+    {
+        if ($this->isResolving($id)) {
+            throw new CircularDependencyException(
+                'Circular dependency detected while resolving service ' . $id . '.',
+                [
+                    'service' => $id,
+                    'stack' => array_values($this->stack),
+                ]
+            );
+        }
+
+        return $this;
     }
 
 }

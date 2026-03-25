@@ -2,6 +2,7 @@
 namespace Juzdy\Container\Attribute;
 
 use Attribute;
+use Dom\Attr;
 
 /**
  * Service preference attribute
