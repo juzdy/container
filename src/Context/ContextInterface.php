@@ -9,7 +9,24 @@ use Traversable;
 
 interface ContextInterface
 {
-    public const PROPERTY_CURRENT_PARAMETER = 'current_parameter';
+
+    /**
+     * Retrieve the container instance or resolve a service directly from it.
+     *
+     * @param string|null $id Service identifier to resolve from the container.
+     *
+     * @return JuzdyContainerInterface|mixed Container instance when $id is null, otherwise resolved service.
+     */
+    public function container(?string $id = null): mixed;
+
+    /**
+     * Get or set the identifier being resolved by the context.
+     *
+     * @param string|null $id Service identifier to assign.
+     *
+     * @return string|static Current identifier when reading, or fluent context instance when writing.
+     */
+    public function id(?string $id = null): string|static;
 
     /**
      * Get or set the fully qualified class name for the current context.
@@ -23,13 +40,40 @@ interface ContextInterface
     public function class(?string $className = null): ?string;
 
     /**
-     * Retrieve the container instance or resolve a service directly from it.
+     * Get or set the concrete instance associated with the context.
      *
-     * @param string|null $id Service identifier to resolve from the container.
+     * @param mixed $instance Instance to assign.
      *
-     * @return JuzdyContainerInterface|mixed Container instance when $id is null, otherwise resolved service.
+     * @return mixed Stored instance when reading, or fluent context instance when writing.
      */
-    public function container(?string $id = null): mixed;
+    public function instance(mixed $instance = null): mixed;
+
+    /**
+     * Get the resolution stack for the current context.
+     *
+     * @param array<int, string>|null $stack    Optional stack to set for the context.
+     *                                          When null, the current stack will be returned without modification.
+     *
+     * @return array<int, string>|static Stack of identifiers representing the resolution path.
+     */
+    public function stack(?array $stack = null): array|static;
+
+    /**
+     * Get or set arbitrary context property value.
+     *
+     * @param string $name Property key.
+     * @param mixed $value Property value to set.
+     *
+     * @return mixed Property value when reading, or fluent context instance when writing.
+     */
+    public function property(string $name, mixed $value = null): mixed;
+
+    /**
+     * Get reflection metadata for the current class.
+     *
+     * @return ReflectionClass|null Class reflection for resolved class, otherwise null.
+     */
+    public function reflection(): ?ReflectionClass;
 
     /**
      * Get reflection information for the current class constructor.
@@ -37,6 +81,24 @@ interface ContextInterface
      * @return ReflectionMethod|null Constructor reflection if class is resolvable, otherwise null.
      */
     public function constructor(): ?ReflectionMethod;
+
+    /**
+     * Yield constructor parameters for dependency resolution.
+     *
+     * @return Traversable<ReflectionParameter> Constructor parameter iterator.
+     */
+    public function params(): Traversable;
+
+    /**
+     * Get or set currently resolving constructor parameter.
+     *
+     * Pass `false` to clear currently tracked resolving parameter.
+     *
+     * @param ReflectionParameter|false|null $param Resolving parameter to assign, or false to clear.
+     *
+     * @return ReflectionParameter|static|null Current parameter when reading, or fluent context instance when writing.
+     */
+    public function resolvingDependency(ReflectionParameter|false|null $param = null): ReflectionParameter|static|null;
 
     /**
      * Register dependencies discovered for the current context.
@@ -48,13 +110,18 @@ interface ContextInterface
     public function depends(...$dependencies): array;
 
     /**
-     * Get or set the identifier being resolved by the context.
+     * Determine whether the context was resolved to a class.
      *
-     * @param string|null $id Service identifier to assign.
-     *
-     * @return string|static Current identifier when reading, or fluent context instance when writing.
+     * @return bool True when class information is available.
      */
-    public function id(?string $id = null): string|static;
+    public function isResolved(): bool;
+
+    /**
+     * Determine whether the context is still unresolved.
+     *
+     * @return bool True when class information is not available.
+     */
+    public function isNotResolved(): bool;
 
     /**
      * Determine whether an instance was already created for this context.
@@ -83,64 +150,6 @@ interface ContextInterface
      * @return bool True when class is not instantiable.
      */
     public function isNotInstantiable(): bool;
-
-    /**
-     * Determine whether the context was resolved to a class.
-     *
-     * @return bool True when class information is available.
-     */
-    public function isResolved(): bool;
-
-    /**
-     * Determine whether the context is still unresolved.
-     *
-     * @return bool True when class information is not available.
-     */
-    public function isNotResolved(): bool;
-
-    /**
-     * Get or set the concrete instance associated with the context.
-     *
-     * @param mixed $instance Instance to assign.
-     *
-     * @return mixed Stored instance when reading, or fluent context instance when writing.
-     */
-    public function instance(mixed $instance = null): mixed;
-
-    /**
-     * Yield constructor parameters for dependency resolution.
-     *
-     * @return Traversable<ReflectionParameter> Constructor parameter iterator.
-     */
-    public function params(): Traversable;
-
-    /**
-     * Get or set arbitrary context property value.
-     *
-     * @param string $name Property key.
-     * @param mixed $value Property value to set.
-     *
-     * @return mixed Property value when reading, or fluent context instance when writing.
-     */
-    public function property(string $name, mixed $value = null): mixed;
-
-    /**
-     * Get reflection metadata for the current class.
-     *
-     * @return ReflectionClass|null Class reflection for resolved class, otherwise null.
-     */
-    public function reflection(): ?ReflectionClass;
-
-    /**
-     * Get or set currently resolving constructor parameter.
-     *
-     * Pass `false` to clear currently tracked resolving parameter.
-     *
-     * @param ReflectionParameter|false|null $param Resolving parameter to assign, or false to clear.
-     *
-     * @return ReflectionParameter|static|null Current parameter when reading, or fluent context instance when writing.
-     */
-    public function resolvingDependency(ReflectionParameter|false|null $param = null): ReflectionParameter|static|null;
 
     /**
      * Determine whether resolved service should be treated as shared singleton.

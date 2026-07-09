@@ -23,6 +23,21 @@ class Context implements ContextInterface
     private string $id;
 
     /**
+     * Arguments passed during service retrieval, used for contextual resolution.
+     *
+     * @var array<int, mixed>
+     */
+    private array $args = [];
+
+
+    /**
+     * Dependency resolution stack for the current context, used to track nested resolutions
+     *
+     * @var array<int, string>
+     */
+    private array $stack = [];
+
+    /**
      * Container instance used by context to resolve dependencies and nested services.
      *
      * @var JuzdyContainerInterface
@@ -104,11 +119,39 @@ class Context implements ContextInterface
      */
     public function __construct(
         string $id,
-        JuzdyContainerInterface $container
+        JuzdyContainerInterface $container,
+        ...$args
+        
     )
     {
         $this->id = $id;
         $this->container = $container;
+        $this->args = $args;
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    public function container(?string $id = null): mixed
+    {
+        if ($id !== null) {
+            return $this->container->get($id);
+        }
+
+        return $this->container;
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    public function id(?string $id = null): string|static
+    {
+        if ($id !== null) {
+            $this->id = $id;
+            return $this;
+        }
+
+        return $this->id;
     }
 
     /**
@@ -133,13 +176,56 @@ class Context implements ContextInterface
     /**
      * {@inheritDoc}
      */
-    public function container(?string $id = null): mixed
+    public function instance(mixed $instance = null): mixed
     {
-        if ($id !== null) {
-            return $this->container->get($id);
+        if ($instance !== null) {
+            $this->instance = $instance;
+
+            return $this;
         }
 
-        return $this->container;
+        return $this->instance;
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    public function stack(?array $stack = null): array|static
+    {
+        if ($stack !== null) {
+            $this->stack = $stack;
+            return $this;
+        }
+
+        return $this->stack;
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    public function property(string $name, mixed $value = null): mixed
+    {
+        if ($value !== null) {
+            $this->properties[$name] = $value;
+
+            return $this;
+        }
+
+        return $this->properties[$name] ?? null;
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    public function reflection(): ?ReflectionClass
+    {
+        try {
+            $this->reflectionClass ??= new ReflectionClass($this->class());
+        } catch (\ReflectionException) {
+            return null;
+        }
+
+        return $this->reflectionClass;
     }
 
     /**
@@ -157,6 +243,40 @@ class Context implements ContextInterface
     /**
      * {@inheritDoc}
      */
+    public function params(): Traversable
+    {
+        if ($this->constructor() === null) {
+            return [];
+        }
+
+        foreach ($this->constructor()?->getParameters() ?? [] as $param) {
+            yield $param;
+        }
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    public function resolvingDependency(ReflectionParameter|false|null $param = null): ReflectionParameter|static|null
+    {
+        if ($param !== null) {
+            if ($param === false) {
+                $this->resolvingParameter = null;
+
+                return $this;
+            }
+
+            $this->resolvingParameter = $param;
+
+            return $this;
+        }
+
+        return $this->resolvingParameter;
+    }
+
+    /**
+     * {@inheritDoc}
+     */
     public function depends(...$dependencies): array
     {
         array_push($this->dependencies, ...$dependencies);
@@ -167,14 +287,17 @@ class Context implements ContextInterface
     /**
      * {@inheritDoc}
      */
-    public function id(?string $id = null): string|static
+    public function isResolved(): bool
     {
-        if ($id !== null) {
-            $this->id = $id;
-            return $this;
-        }
+        return $this->class() !== null;
+    }
 
-        return $this->id;
+    /**
+     * {@inheritDoc}
+     */
+    public function isNotResolved(): bool
+    {
+        return !$this->isResolved();
     }
 
     /**
@@ -214,98 +337,6 @@ class Context implements ContextInterface
     /**
      * {@inheritDoc}
      */
-    public function isResolved(): bool
-    {
-        return $this->class() !== null;
-    }
-
-    /**
-     * {@inheritDoc}
-     */
-    public function isNotResolved(): bool
-    {
-        return !$this->isResolved();
-    }
-
-    /**
-     * {@inheritDoc}
-     */
-    public function instance(mixed $instance = null): mixed
-    {
-        if ($instance !== null) {
-            $this->instance = $instance;
-
-            return $this;
-        }
-
-        return $this->instance;
-    }
-
-    /**
-     * {@inheritDoc}
-     */
-    public function params(): Traversable
-    {
-        if ($this->constructor() === null) {
-            return [];
-        }
-
-        foreach ($this->constructor()?->getParameters() ?? [] as $param) {
-            yield $param;
-        }
-    }
-
-    /**
-     * {@inheritDoc}
-     */
-    public function property(string $name, mixed $value = null): mixed
-    {
-        if ($value !== null) {
-            $this->properties[$name] = $value;
-
-            return $this;
-        }
-
-        return $this->properties[$name] ?? null;
-    }
-
-    /**
-     * {@inheritDoc}
-     */
-    public function reflection(): ?ReflectionClass
-    {
-        try {
-            $this->reflectionClass ??= new ReflectionClass($this->class());
-        } catch (\ReflectionException) {
-            return null;
-        }
-
-        return $this->reflectionClass;
-    }
-
-    /**
-     * {@inheritDoc}
-     */
-    public function resolvingDependency(ReflectionParameter|false|null $param = null): ReflectionParameter|static|null
-    {
-        if ($param !== null) {
-            if ($param === false) {
-                $this->resolvingParameter = null;
-
-                return $this;
-            }
-
-            $this->resolvingParameter = $param;
-
-            return $this;
-        }
-
-        return $this->resolvingParameter;
-    }
-
-    /**
-     * {@inheritDoc}
-     */
     public function shouldShare(): bool
     {
         if ($this->shouldShare !== null) {
@@ -337,7 +368,6 @@ class Context implements ContextInterface
 
     /**
      * {@inheritDoc}
-     * 
      */
     public function shouldPrototype(): bool
     {

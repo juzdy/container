@@ -13,15 +13,11 @@ class DependencyCollector extends AbstractPipelineablePipe
         }
 
         foreach ($context->params() as $param) {
-            //$context->property(ContextInterface::PROPERTY_CURRENT_PARAMETER, $param);
+            
             $context->resolvingDependency($param);
 
             $context = $this->getPipeline()->process($context);
-
-            //$context->depends($dependency);
         }
-
-        
 
         return $next($context);
     }

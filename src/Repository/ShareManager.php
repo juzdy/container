@@ -3,6 +3,7 @@
 namespace Juzdy\Container\Repository;
 
 use Juzdy\Container\Attribute\Shared;
+use Juzdy\Container\Contract\Lifecycle\SharedInterface;
 
 /**
  * Repository for shared instances
@@ -10,7 +11,7 @@ use Juzdy\Container\Attribute\Shared;
  * @package Juzdy\Container\Repository
  */
 #[Shared]
-class ShareManager
+class ShareManager implements SharedInterface
 {
 
     /**
@@ -48,19 +49,41 @@ class ShareManager
     /**
      * {@inheritDoc}
      */
-    public function share(string $id, mixed $instance): static
+    public function share(string|array $id, mixed $instance): static
     {
-        $this->instances[$id] = $instance;
+        match (true) {
+            is_array($id) => $this->shareMultiple($id, $instance),
+            default => $this->instances[$id] = $instance,
+        };
 
         return $this;
+    }
+
+    protected function shareMultiple(array $ids, mixed $instance): void
+    {
+        foreach ($ids as $singleId) {
+            if (!is_string($singleId)) {
+                throw new \InvalidArgumentException("ShareManager: All IDs must be strings");
+            }
+            $this->instances[$singleId] = $instance;
+        }
     }
 
     /**
      * {@inheritDoc}
      */
-    public function unshare(string $id): static
+    public function unshare(string|array $id): static
     {
-        unset($this->instances[$id]);
+        if (is_array($id)) {
+            foreach ($id as $singleId) {
+                if (!is_string($singleId)) {
+                    throw new \InvalidArgumentException("ShareManager: All IDs must be strings");
+                }
+                unset($this->instances[$singleId]);
+            }
+        } else {
+            unset($this->instances[$id]);
+        }
 
         return $this;
     }

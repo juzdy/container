@@ -1,17 +1,18 @@
 <?php
 
-namespace Juzdy\Container\Repository;
+namespace Juzdy\Container\Binder;
 
 use Closure;
 use Juzdy\Config\ConfigInterface;
 use Juzdy\Container\Attribute\Shared;
-use Juzdy\Container\Repository\Binding\Definition;
+use Juzdy\Container\Contract\Lifecycle\SharedInterface;
+use Juzdy\Container\Binder\Definition;
 
 /**
  * Manager for bounds
  */
 #[Shared]
-class BindingManager
+class BindingManager implements SharedInterface
 {
     
     /**

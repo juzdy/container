@@ -1,6 +1,6 @@
 <?php
 
-namespace Juzdy\Container\Repository\Binding;
+namespace Juzdy\Container\Binder;
 
 use Closure;
 

@@ -7,6 +7,7 @@
 namespace Juzdy\Container;
 
 use Psr\Container\ContainerInterface;
+use Juzdy\Config\ConfigInterface;
 use Juzdy\Container\Context\Context;
 use Juzdy\Container\Context\ContextInterface;
 use Juzdy\Container\Exception\CircularDependencyException;
@@ -18,7 +19,7 @@ use Juzdy\Container\Pipeline\Pipe\ImplementationResolver;
 use Juzdy\Container\Pipeline\Pipe\InstanceFetcher;
 use Juzdy\Container\Pipeline\Pipe\Instantiator;
 use Juzdy\Container\Pipeline\Pipe\LifeCycler;
-use Juzdy\Container\Repository\BindingManager;
+use Juzdy\Container\Binder\BindingManager;
 use Juzdy\Container\Repository\ShareManager;
 use Throwable;
 
@@ -50,6 +51,17 @@ class Container implements JuzdyContainerInterface
     //protected array $propagatedPreferences = [];
 
     /**
+     * @var ContextPipeline|null Pipeline for creating new service instances
+     */
+    private ?ContextPipeline $createServicePipeline = null;
+    /**
+     * @var ContextPipeline|null Pipeline for fetching existing service instances
+     */
+    private ?ContextPipeline $existingServicePipeline = null;
+
+    private ?ConfigInterface $config = null;
+
+    /**
      * Container constructor.
      * Initializes the container and registers default plugins.
      */
@@ -57,6 +69,90 @@ class Container implements JuzdyContainerInterface
     {
         $this->setSystemShare(ShareManager::class, new ShareManager());
         $this->setSystemShare(BindingManager::class, new BindingManager());
+
+        $this->preparePipelines();
+        
+    }
+
+    protected function preparePipelines(): static
+    {
+        /**
+         * The create pipeline is responsible for creating new instances when no existing instance is found.
+         * It consists of several stages:
+         * - ImplementationResolver: Determines the concrete class to instantiate based on the requested identifier and bindings.
+         * - DependencyCollector: Collects the dependencies required to instantiate the class, using attributes and type hints.
+         * - Instantiator: Creates the instance of the class, potentially using lazy loading or other instantiation strategies.
+         * - Configurator: Applies any necessary configuration or injections after instantiation.
+         * - LifeCycler: Handles lifecycle management, such as sharing the instance if applicable.
+         */
+        $this->createServicePipeline = (new ContextPipeline(
+            
+            new ImplementationResolver(
+                new \Juzdy\Container\Pipeline\Pipe\Resolver\ImplementationCache(),
+                new \Juzdy\Container\Pipeline\Pipe\Resolver\Concrete(),
+                new \Juzdy\Container\Pipeline\Pipe\Resolver\BindingResolver(),
+                new \Juzdy\Container\Pipeline\Pipe\Resolver\InterfaceConvention(),
+            ),
+            new DependencyCollector(
+                new \Juzdy\Container\Pipeline\Pipe\DependencyCollector\UseParameterAttributePreference(),
+                new \Juzdy\Container\Pipeline\Pipe\DependencyCollector\UseClassAttributePreference(),
+                new \Juzdy\Container\Pipeline\Pipe\DependencyCollector\UseTypeHint(),
+                new \Juzdy\Container\Pipeline\Pipe\DependencyCollector\DependencyNotFound()
+            ),
+            new Instantiator(
+                new \Juzdy\Container\Pipeline\Pipe\Instantiator\LazyGhostInstance(),
+                new \Juzdy\Container\Pipeline\Pipe\Instantiator\StandardInstance(),
+                new \Juzdy\Container\Pipeline\Pipe\Instantiator\ReflectionInstance(),
+                new \Juzdy\Container\Pipeline\Pipe\Instantiator\InstantiatorNotFound(),
+            ),
+            new Configurator(
+                new \Juzdy\Container\Pipeline\Pipe\Configurator\Injector(),
+                //new \Juzdy\Container\Pipeline\Pipe\Attribute\ApplyAttributes()
+            ),
+            new LifeCycler(
+                new \Juzdy\Container\Pipeline\Pipe\LifeCycler\ShareIfApplicable()
+            )
+        ));
+
+        /**
+         * The existing pipeline is responsible for fetching existing instances from the container.
+         * It checks for shared instances, bound instances, and other existing services before attempting to create a new instance.
+         * This allows the container to return existing instances when available, improving performance and ensuring shared services
+         */
+        $this->existingServicePipeline = new ContextPipeline(
+            new InstanceFetcher(
+                new \Juzdy\Container\Pipeline\Pipe\Fetcher\SharedInstance(),
+                new \Juzdy\Container\Pipeline\Pipe\Fetcher\Prototype()
+            ),
+        );
+
+        return $this;
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    public function withConfig(ConfigInterface $config): static
+    {
+        $this->config = $config;
+
+        return $this;
+    }
+
+    /**
+     * Get the configuration instance or a specific configuration value by key.
+     *
+     * @param string|null $key The configuration key to retrieve, or null to get the entire configuration instance.
+     * 
+     * @return mixed The configuration value associated with the given key, or the entire configuration instance if no key is provided.
+     */
+    protected function getConfig(?string $key = null): mixed
+    {
+        if ($key === null) {
+            return $this->config;
+        }
+
+        return $this->config->get($key);
     }
 
     /**
@@ -69,7 +165,7 @@ class Container implements JuzdyContainerInterface
                 ->startResolving($id);
 
             return match (true) {
-                $id === ContainerInterface::class => true,
+                $id === ContainerInterface::class,
                 $id === static::class => true,
                 $this->hasSystemShare($id) => true,
                 $this->existing($id) !== null => true,
@@ -90,28 +186,25 @@ class Container implements JuzdyContainerInterface
     /**
      * {@inheritDoc}
      */
-    public function get(string $id): mixed
+    public function get(string $id, ...$args): mixed
     {
         try {
             $this->assertNotResolving($id)
                 ->startResolving($id);
 
-            return $service = match (true) {
-                $id === ContainerInterface::class => $this,
-                $id === static::class => $this,
+            return match (true) {
+                $id === ContainerInterface::class,
+                $id === static::class 
+                    => $this,
                 $this->hasSystemShare($id) => $this->getSystemShare($id),
                 ($instance = $this->existing($id)) !== null => $instance,
-                default => $this->create($id),
+                default => $this->create($id, ...$args),
             };
 
         //} catch (Throwable $exception) {
         } catch (NotFoundException $exception) {
             throw new NotFoundException(
-                "Service '$id' not found.",
-                [
-                    'service' => $id,
-                    'stack' => array_values($this->stack),
-                ],
+                "Service '$id' not found. Stack: " . implode(' -> ', array_values($this->stack)),
                 0,
                 $exception
             );
@@ -134,37 +227,10 @@ class Container implements JuzdyContainerInterface
      */
     protected function existing(string $id): mixed
     {
-        $pipeline = new ContextPipeline(
-            new ImplementationResolver(
-                \Juzdy\Container\Pipeline\Pipe\Resolver\Concrete::class,
-                \Juzdy\Container\Pipeline\Pipe\Resolver\BindingResolver::class,
-                \Juzdy\Container\Pipeline\Pipe\Resolver\InterfaceConvention::class
-            ),
-            new InstanceFetcher(
-                \Juzdy\Container\Pipeline\Pipe\Fetcher\SharedInstance::class,
-                \Juzdy\Container\Pipeline\Pipe\Fetcher\Prototype::class
-            ),
-        );
-
-        $context = $pipeline($this->serviceContext($id));
-
+        $context = ($this->existingServicePipeline)($this->serviceContext($id));
         
         return $context->instance();
     }
-
-    // protected function _existing(string $id): mixed
-    // {
-    //     if ($id == ConfigInterface::class) {
-    //         return $this->_existing($id);
-    //     }
-    //     $sharedRepo = $this->getShareManager();
-
-    //     if ($sharedRepo->has($id)) {
-    //         return $sharedRepo->get($id);
-    //     }
-
-    //     return null;
-    // }
 
     /**
      * Create the service instance for the given identifier.
@@ -174,41 +240,13 @@ class Container implements JuzdyContainerInterface
      * 
      * @return mixed The created service instance
      */
-    protected function create(string $id): mixed
+    public function create(string $id, ...$args): mixed
     {
-        $pipeline = (new ContextPipeline(
-            new ImplementationResolver(
-                \Juzdy\Container\Pipeline\Pipe\Resolver\Concrete::class,
-                \Juzdy\Container\Pipeline\Pipe\Resolver\BindingResolver::class,
-                \Juzdy\Container\Pipeline\Pipe\Resolver\InterfaceConvention::class
-            ),
-            new DependencyCollector(
-                \Juzdy\Container\Pipeline\Pipe\DependencyCollector\UseParameterAttributePreference::class,
-                \Juzdy\Container\Pipeline\Pipe\DependencyCollector\UseClassAttributePreference::class,
-                \Juzdy\Container\Pipeline\Pipe\DependencyCollector\UseTypeHint::class,
-                \Juzdy\Container\Pipeline\Pipe\DependencyCollector\DependencyNotFound::class
-            ),
-            new Instantiator(
-                \Juzdy\Container\Pipeline\Pipe\Instantiator\LazyGhostInstance::class,
-                \Juzdy\Container\Pipeline\Pipe\Instantiator\StandardInstance::class,
-                \Juzdy\Container\Pipeline\Pipe\Instantiator\ReflectionInstance::class,
-                \Juzdy\Container\Pipeline\Pipe\Instantiator\InstantiatorNotFound::class,
-            ),
-            new Configurator(
-                \Juzdy\Container\Pipeline\Pipe\Configurator\Injector::class
-            ),
-            new LifeCycler(
-                \Juzdy\Container\Pipeline\Pipe\LifeCycler\ShareIfApplicable::class
-            )
-        ));
-
-        $context = $pipeline($this->serviceContext($id));
+        $context = ($this->createServicePipeline)($this->serviceContext($id, ...$args));
 
         return $context->instance();
 
     }
-
-    
 
     /**
      * Check if a service is currently being resolved.
@@ -232,7 +270,7 @@ class Container implements JuzdyContainerInterface
     private function startResolving(string $id): static
     {
         if (count($this->stack) > 100) {
-            //todo    
+            // @todo
         }
 
         $this->resolving[$id] = true;
@@ -267,9 +305,10 @@ class Container implements JuzdyContainerInterface
     }
 
     /**
-     * Get the ShareManager instance from the container.
+     * Check if a system-wide shared service exists for the given identifier.
      *
-     * @return ShareManager The ShareManager instance
+     * @param string $id The service identifier to check
+     * @return bool True if a system-wide shared service exists for the given identifier, false otherwise
      */
     protected function hasSystemShare(string $id): bool
     {
@@ -302,32 +341,18 @@ class Container implements JuzdyContainerInterface
     }
 
     /**
-     * @param ContextInterface $context
-     * @param string $stage
-     * @return array<string, mixed>
-     */
-    protected function exceptionContext(ContextInterface $context, string $stage): array
-    {
-        return [
-            'stage' => $stage,
-            'service' => $context->id(),
-            'class' => $context->class(),
-            'stack' => array_values($this->stack),
-        ];
-    }
-
-    /**
      * Create a new context for the given service identifier.
      *
      * @param string $id The service identifier
      * 
      * @return ContextInterface The created context
      */
-    protected function serviceContext(string $id, ): ContextInterface
+    protected function serviceContext(string $id/*, ...$args*/): ContextInterface
     {
         return 
             (new Context($id, $this))
-        //        ->stack($this->stack)
+                ->stack($this->stack())
+                //->depends(...$args)
         ;
     }
 
@@ -342,15 +367,16 @@ class Container implements JuzdyContainerInterface
     {
         if ($this->isResolving($id)) {
             throw new CircularDependencyException(
-                'Circular dependency detected while resolving service ' . $id . '.',
-                [
-                    'service' => $id,
-                    'stack' => array_values($this->stack),
-                ]
+                "Circular dependency detected while resolving service '{$id}'. Stack: " . implode(' -> ', array_values($this->stack)),
             );
         }
 
         return $this;
+    }
+
+    protected function profile(string $id)
+    {
+        //
     }
 
 }

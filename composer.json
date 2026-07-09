@@ -1,7 +1,12 @@
 {
     "name": "juzdy/container",
     "description": "The JUZDY PSR-11 Container",
-    "keywords": ["php", "psr", "psr-11", "container"],
+    "keywords": [
+        "php",
+        "psr",
+        "psr-11",
+        "container"
+    ],
     "license": "MIT",
     "authors": [
         {
@@ -11,6 +16,7 @@
     ],
     "require": {
         "php": ">=8.2",
+        "juzdy/config": "dev-main",
         "psr/container": "^2.0",
         "psr/simple-cache": "^3.0"
     },
@@ -20,13 +26,10 @@
         }
     },
     "autoload-dev": {
-        "psr-4": {
-        }
+        "psr-4": {}
     },
     "extra": {
-        "juzdy": {
-        }
+        "juzdy": []
     },
-    "config": {
-    }
+    "config": {}
 }

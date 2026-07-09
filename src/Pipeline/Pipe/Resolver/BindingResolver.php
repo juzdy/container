@@ -3,7 +3,7 @@ namespace Juzdy\Container\Pipeline\Pipe\Resolver;
 
 use Juzdy\Container\Context\ContextInterface;
 use Juzdy\Container\Pipeline\ContextPipeInterface;
-use Juzdy\Container\Repository\BindingManager;
+use Juzdy\Container\Binder\BindingManager;
 
 class BindingResolver implements ContextPipeInterface
 {

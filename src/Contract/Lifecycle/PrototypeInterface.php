@@ -4,4 +4,5 @@ namespace Juzdy\Container\Contract\Lifecycle;
 interface PrototypeInterface
 {
     public function __clone();
+    public function prototype(): static;
 }

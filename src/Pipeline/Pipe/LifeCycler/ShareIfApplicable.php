@@ -16,10 +16,11 @@ class ShareIfApplicable implements ContextPipeInterface
     public function __invoke(ContextInterface $context, callable $next): mixed
     {
         if ($context->isInstantiated() && $context->shouldShare()) {
+            $instance = $context->instance();
             $context->container(ShareManager::class)
                 ->share(
-                    $context->class(),
-                    $context->instance()
+                    [$context->id(), $context->class()],
+                    $instance
                 );
         }
 

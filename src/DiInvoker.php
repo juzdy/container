@@ -17,6 +17,11 @@ class DiInvoker
     ) {
     }
 
+    public function __invoke(callable $callable): mixed
+    {
+        return $this->invoke($callable);
+    }
+
     public function invoke(callable $callable): mixed
     {
         [$reflection, $resolvedCallable] = $this->resolveCallable($callable);
@@ -143,19 +148,24 @@ class DiInvoker
 
             $typeName = $type->getName();
 
+            if ($type->allowsNull()) {
+                $dependencies[] = null;
+                continue;
+            }
+
+            if ($this->canUseDefault($parameter)) {
+                continue;
+            }
+
             try {
                 $dependencies[] = $this->getContainer()->get($typeName);
-            } catch (\Psr\Container\NotFoundExceptionInterface) {
-                if ($type->allowsNull()) {
-                    $dependencies[] = null;
-                    continue;
-                }
+            } catch (\Psr\Container\NotFoundExceptionInterface $e) {
 
-                if ($this->canUseDefault($parameter)) {
-                    continue;
-                }
-
-                throw new DiInvokerException("Cannot resolve dependency: {$typeName} for parameter \${$parameter->getName()}.");
+                throw new DiInvokerException(
+                    "Cannot resolve dependency: {$typeName} for parameter \${$parameter->getName()}.",
+                    0,
+                    $e
+                );
             }
         }
 
@@ -166,8 +176,8 @@ class DiInvoker
     {
         try {
             return $this->getContainer()->get($serviceName);
-        } catch (\Psr\Container\NotFoundExceptionInterface) {
-            throw new DiInvokerException("Cannot resolve class {$className} for callable {$className}::{$methodName}.");
+        } catch (\Psr\Container\NotFoundExceptionInterface $e) {
+            throw new DiInvokerException("Cannot resolve class {$className} for callable {$className}::{$methodName}.", 0, $e);
         }
     }
 

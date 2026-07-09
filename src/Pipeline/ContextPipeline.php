@@ -8,6 +8,7 @@ class ContextPipeline
      * @var array<int, (ContextPipeInterface|string)[]>
      */
     private array $pipes = [];
+    private array $pipeInstances = [];
 
     const PRIORITY_AUTO_STEP = 100;
 
@@ -55,7 +56,7 @@ class ContextPipeline
         $pipeline = array_reduce(
             array_reverse($orderedPipes),
             function ($next, $pipe) {
-                $pipe = is_string($pipe) ? new $pipe() : $pipe;
+                $pipe = is_string($pipe) ? $this->getOrCreatePipe($pipe) : $pipe;
                 return fn ($target) => $pipe($target, $next);
             },
             $next
@@ -88,6 +89,21 @@ class ContextPipeline
         }
 
         return $this->orderedPipesCache = $ordered;
+    }
+
+    /**
+     * Create a pipe instance from a class name.
+     *
+     * @param string $class The class name of the pipe.
+     * @return ContextPipeInterface The created pipe instance.
+     */
+    private function getOrCreatePipe(string $class): ContextPipeInterface
+    {
+        echo "<br/>Creating pipe instance for class: $class"; // Debug statement
+        if (!isset($this->pipeInstances[$class])) {
+            $this->pipeInstances[$class] = new $class();
+        }
+        return $this->pipeInstances[$class];
     }
 
 }

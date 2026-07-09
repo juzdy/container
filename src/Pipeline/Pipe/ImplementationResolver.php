@@ -18,20 +18,13 @@ class ImplementationResolver extends AbstractPipelineablePipe
 
             if ($context->isNotResolved()) {
                 throw new ClassNotResolvedException(
-                    "Cannot resolve service '{$context->id()}'.",
-                    [
-                        'service' => $context->id(),
-                    ]
+                    "Cannot resolve service '{$context->id()}'."
                 );
             }
 
             if (!class_exists($context->class())) {
                 throw new ClassNotFoundException(
-                    "Resolved class '{$context->class()}' for service '{$context->id()}' does not exist.",
-                    [
-                        'service' => $context->id(),
-                        'class' => $context->class(),
-                    ]
+                    "Resolved class '{$context->class()}' for service '{$context->id()}' does not exist."
                 );
             }
 
